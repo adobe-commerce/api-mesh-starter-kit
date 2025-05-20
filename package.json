@@ -1,0 +1,58 @@
+{
+  "name": "api-mesh-starter-kit",
+  "version": "0.0.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@adobe/plugin-hooks": "^0.1.0",
+    "@adobe/plugin-on-fetch": "^0.1.0",
+    "@graphql-mesh/cli": "0.82.30",
+    "@graphql-mesh/graphql": "0.34.13",
+    "@graphql-mesh/http": "^0.96.9",
+    "@graphql-mesh/json-schema": "0.35.38",
+    "@graphql-mesh/openapi": "0.33.39",
+    "@graphql-mesh/plugin-http-details-extensions": "0.1.21",
+    "@graphql-mesh/runtime": "0.46.21",
+    "@graphql-mesh/soap": "0.14.25",
+    "@graphql-mesh/transform-encapsulate": "0.4.21",
+    "@graphql-mesh/transform-federation": "0.11.14",
+    "@graphql-mesh/transform-filter-schema": "0.15.23",
+    "@graphql-mesh/transform-hoist-field": "0.2.21",
+    "@graphql-mesh/transform-naming-convention": "0.13.22",
+    "@graphql-mesh/transform-prefix": "0.12.22",
+    "@graphql-mesh/transform-prune": "0.1.20",
+    "@graphql-mesh/transform-rename": "0.14.22",
+    "@graphql-mesh/transform-replace-field": "0.4.20",
+    "@graphql-mesh/transform-resolvers-composition": "0.13.20",
+    "@graphql-mesh/transform-type-merging": "0.5.20",
+    "@graphql-mesh/types": "0.91.12",
+    "eslint-plugin-no-loops": "^0.3.0",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-security": "^1.5.0",
+    "eslint-plugin-sonarjs": "^0.16.0",
+    "fastify": "^4.10.2",
+    "graphql": "^16.6.0",
+    "graphql-yoga": "3.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "api-mesh"
+  ],
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "nodemon --watch mesh.json --watch .env node_modules/.bin/aio api-mesh run mesh.json",
+    "debug": "nodemon --watch mesh.json --watch .env node_modules/.bin/aio api-mesh run mesh.json --debug",
+    "setupTelemetry": "echo {aio-cli-telemetry: {optOut: false}} > ~/.config/aio",
+    "setup": "yarn setupTelemetry & aio plugins:install @adobe/aio-cli-plugin-api-mesh",
+    "postinstall": "yarn setup"
+  },
+  "description": "API mesh starter template",
+  "author": "Adobe Inc.",
+  "devDependencies": {
+    "@adobe/aio-cli": "^10.0.0",
+    "nodemon": "^3.1.3"
+  }
+}
