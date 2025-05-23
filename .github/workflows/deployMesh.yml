@@ -3,8 +3,8 @@ name: Deploy Mesh
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push or pull request events but only for the "main" branch
-  #   push:
-  #     branches: ["main"]
+  push:
+    branches: ["main"]
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -59,9 +59,26 @@ jobs:
           cat .env
       - name: Print AIO CLI Config
         run: aio config list
-      - name: Describe
-        run: aio api-mesh:describe
-      - name: Get
-        run: aio api-mesh:get
-      - name: Update
+      - name: Get Mesh
+        id: get_mesh
+        continue-on-error: true
+        run: |
+          output=$(aio api-mesh:get 2>&1)
+          # Escape the output and replace newlines with %0A
+          escaped_output=$(echo "$output" | tr -d '\r' | tr '\n' ' ')
+          echo "mesh_output=$escaped_output" >> $GITHUB_OUTPUT
+          echo "$output"
+      - name: Debug Get Mesh Output
+        run: echo "Get Mesh Output - ${{ steps.get_mesh.outputs.mesh_output }}"
+      - name: Create Mesh
+        if: ${{ contains(steps.get_mesh.outputs.mesh_output, 'No mesh found') }}
+        run: aio api-mesh:create -c mesh.json --env .env
+      - name: Update Mesh
+        if: ${{ !contains(steps.get_mesh.outputs.mesh_output, 'No mesh found') }}
         run: aio api-mesh:update -c mesh.json --env .env
+      - name: Wait for 30 seconds
+        run: sleep 30
+      - name: Describe Mesh
+        run: aio api-mesh:describe
+      - name: Get Mesh Status
+        run: aio api-mesh:status
