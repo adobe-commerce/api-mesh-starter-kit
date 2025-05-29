@@ -51,12 +51,6 @@ jobs:
         run: aio console:project:select ${{ secrets.PROJECTID }}
       - name: Select workspace
         run: aio console:workspace:select ${{ secrets.WORKSPACEID }}
-      - name: "Create env file"
-        run: |
-          touch .env
-          echo API_ENDPOINT="https://xxx.execute-api.us-west-2.amazonaws.com" >> .env
-          echo API_KEY=${{ secrets.API_KEY }} >> .env
-          cat .env
       - name: Print AIO CLI Config
         run: aio config list
       - name: Get Mesh
@@ -69,6 +63,7 @@ jobs:
           echo "mesh_output=$escaped_output" >> $GITHUB_OUTPUT
           echo "$output"
       - name: Debug Get Mesh Output
+        continue-on-error: true
         run: echo "Get Mesh Output - ${{ steps.get_mesh.outputs.mesh_output }}"
       - name: Create Mesh
         if: ${{ contains(steps.get_mesh.outputs.mesh_output, 'No mesh found') }}
