@@ -47,7 +47,8 @@
     "debug": "nodemon --watch mesh.json --watch .env node_modules/.bin/aio api-mesh run mesh.json --debug",
     "setupTelemetry": "echo {aio-cli-telemetry: {optOut: false}} > ~/.config/aio",
     "setup": "yarn setupTelemetry & aio plugins:install @adobe/aio-cli-plugin-api-mesh",
-    "postinstall": "yarn setup"
+    "postinstall": "yarn setup",
+    "test:perf": "k6 run k6TestScript.js -e MESH_ENDPOINT=<INSERT_MESH_ENDPOINT_HERE> --vus 1 --duration 60s"
   },
   "description": "API mesh starter template",
   "author": "Adobe Inc.",
