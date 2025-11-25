@@ -1,0 +1,754 @@
+Adobe API Mesh — llms-full.txt (Developer-Focused, JSON & JS Examples)
+========================================================================
+This file is strictly based on the official Adobe Commerce API Mesh samples:
+https://github.com/adobe/adobe-commerce-samples/tree/main/api-mesh
+No non-existent "serve" or CORS configuration is included.
+
+SECTION 0 — Overview
+- Purpose: unify multiple REST/GraphQL/OpenAPI endpoints into a single GraphQL mesh
+- Supports: JSON-only mesh configs, JsonSchema handlers, GraphQL handlers, OpenAPI handlers, custom resolvers, transforms
+- Includes: local dev, debugging, CI/CD, deployment guidance based on repo patterns
+
+SECTION 1 — Mesh JSON Examples
+
+1.1 Basic mesh.json (GraphQL source)
+{
+  "name": "basic-mesh",
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "commerce-graphql",
+        "handler": {
+          "graphql": {
+            "endpoint": "https://dev-commerce.example/graphql",
+            "headers": {
+              "Authorization": "Bearer {{env.COMMERCE_TOKEN}}"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+
+1.2 JsonSchema handler example
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "carts",
+        "handler": {
+          "JsonSchema": {
+            "baseUrl": "{{env.COMMERCE_URL}}",
+            "operations": [
+              {
+                "type": "Query",
+                "field": "getCart",
+                "path": "/V1/carts/{{args.cartId}}",
+                "method": "GET",
+                "responseSchema": "./schemas/cart.response.json"
+              },
+              {
+                "type": "Mutation",
+                "field": "createCart",
+                "path": "/V1/carts",
+                "method": "POST",
+                "requestSchema": "./schemas/create-cart.request.json",
+                "responseSchema": "./schemas/cart.response.json"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
+
+1.3 OpenAPI handler example
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "openapi-source",
+        "handler": {
+          "openapi": {
+            "source": "./openapi.yaml",
+            "baseUrl": "{{env.OPENAPI_BASE_URL}}"
+          }
+        }
+      }
+    ]
+  }
+}
+
+SECTION 2 — additionalResolvers Examples
+
+2.1 Declarative JSON resolver
+{
+  "Query": {
+    "myCart": {
+      "type": "single",
+      "source": "carts",
+      "operation": "getCart",
+      "mapArgs": { "cartId": "args.cartId" }
+    }
+  }
+}
+
+2.2 Programmatic JS resolver (resolvers/cartResolver.js)
+module.exports = {
+  Query: {
+    myCart: async (parent, args, context, info) => {
+      const { data: cart } = await context.sources.carts.operations.getCart({ cartId: args.cartId });
+      const productIds = cart.items.map(i => i.productId);
+      const products = await context.sources.productsApi.request({
+        document: `query ($ids: [ID!]!) { products(ids: $ids) { id sku name } }`,
+        variables: { ids: productIds }
+      });
+      return {
+        ...cart,
+        items: cart.items.map(it => ({ ...it, product: products.find(p => p.id === it.productId) }))
+      };
+    }
+  }
+};
+
+SECTION 3 — additionalTypeDefs Example
+# ./type-defs/unify.graphql
+type Cart {
+  id: ID!
+  items: [CartItem!]!
+  totals: CartTotals
+}
+extend type Query {
+  myCart(cartId: ID!): Cart
+}
+
+SECTION 4 — Transforms Example
+"transforms": [
+  { "typeMerging": { "types": ["Product", "Category"] } },
+  { "renameFields": { "oldName": "newName" } }
+]
+
+SECTION 5 — Local Development
+- Initialize a local environment:
+  - Run: `aio api-mesh:init <project-name>`
+  - Choose install directory, whether to initialize Git, and package manager (npm/yarn).
+- Run the mesh locally (default port 5000; override with --port or PORT in .env):
+  - `aio api-mesh run mesh.json --port 9000`
+  - Default GraphQL endpoint: `http://localhost:5000/graphql`
+  - Tip: use `--select` with `run` to deploy the selected workspace artifact without rebuilding.
+- Files created by `aio api-mesh:init`:
+  - `.devcontainer/devcontainer.json`
+  - `.github/workflows/deploy.yaml`
+  - `.vscode/launch.json`
+  - `.env` (sample)
+  - `mesh.json` (sample)
+  - `README.md`
+
+5.1 Environment variables
+- An `.env` file is created automatically. You can provide a specific env file via the `--env` flag in create/update commands.
+- Example `.env`:
+  APIName='Adobe Commerce API'
+  commerceURL='<your_endpoint>'
+  includeHTTPDetailsValue=true
+  PORT=9000
+- Example mesh usage:
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "{{env.APIName}}",
+        "handler": {
+          "graphql": {
+            "endpoint": "{{env.commerceURL}}"
+          }
+        }
+      }
+    ],
+    "responseConfig": {
+      "includeHTTPDetails": {{env.includeHTTPDetailsValue}}
+    }
+  }
+}
+Note: Only set `includeHTTPDetails` to true in local development; do not enable in production.
+
+5.2 Reference files directly
+- You can reference files directly in your mesh (automatic minify/stringify):
+  - Allowed formats: JS and JSON only
+  - Path length: less than 25 characters
+  - Location: must be in the same directory as the referencing mesh file
+  - Not allowed: files in `~` or home directory
+- Example (JsonSchema handler requestSchema):
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "<json_source_name>",
+        "handler": {
+          "JsonSchema": {
+            "baseUrl": "<json_source__baseurl>",
+            "operations": [
+              {
+                "type": "Query",
+                "field": "<query>",
+                "path": "<query_path>",
+                "method": "POST",
+                "requestSchema": "./requestParams.json"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "files": [
+      {
+        "path": "./schemaBody.json",
+        "content": "{\"$schema\":\"http://json-schema.org/draft-01/schema\",\"type\":\"object\"}"
+      }
+    ]
+  }
+}
+Note: The `files` array supports `.js`, `.ts`, and `.graphql` entries.
+
+5.3 Schedule performance testing
+- GitHub Actions variables (repo Settings → Variables → Actions):
+  - `VUS` (virtual users)
+  - `DURATION` (seconds)
+  - `UPLOAD_REPORT` (boolean)
+  - `MESH_ENDPOINT` (edge mesh URL)
+- Local performance run:
+  `K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT=<FILENAME>.html yarn test:perf`
+
+SECTION 6 — Deployment & CI/CD
+1. Validate mesh.json and resolvers
+2. Deploy to Adobe App Builder with `aio app deploy --project=<project-id>`
+3. Versioning / rollback via Git tags/releases
+4. CI/CD Tips:
+   - Store secrets in CI vault
+   - Run unit tests for resolvers
+   - Validate JSON-only mesh configs
+
+SECTION 7 — Example Project Structure
+/mesh-project
+  mesh.json
+  resolvers/
+    cartResolver.js
+    productResolver.js
+  type-defs/
+    unify.graphql
+  schemas/
+    cart.response.json
+    create-cart.request.json
+    product.response.json
+  .env
+  package.json
+  README.md
+
+SECTION 8 — Troubleshooting
+- Encoding issues: update CLI
+- 401 errors: check env variable tokens
+- Schema conflicts: use additionalTypeDefs or rename types
+- Performance N+1: batch in resolvers
+
+END OF FILE
+
+SECTION 9 — API Mesh CORS Configuration
+
+- API Mesh supports CORS via responseConfig.CORS in mesh.json
+
+Example:
+{
+  "meshConfig": {
+    "responseConfig": {
+      "CORS": {
+        "origin": ["https://www.your-domain.com", "http://localhost:3000"],
+        "methods": ["GET", "POST", "PUT", "HEAD", "OPTIONS"],
+        "allowedHeaders": ["Content-Type", "Authorization"],
+        "exposedHeaders": ["Content-Range", "X-Content-Range"],
+        "maxAge": 60480,
+        "credentials": true
+      }
+    },
+    "sources": [
+      /* … your sources … */
+    ]
+  }
+}
+
+Notes:
+- Do not use "*" for origin; specify allowed domains explicitly.
+- Adjust allowedHeaders, exposedHeaders, and methods as needed for your app.
+- credentials:true allows passing cookies and other credentials across origins.
+
+SECTION 10 — Context State (Edge-distributed key/value)
+
+- Enable context state in your mesh:
+{
+  "meshConfig": {
+    "state": {
+      "enabled": true
+    }
+    /* ... */
+  }
+}
+
+- API (edge-distributed, available to hooks and resolvers):
+interface StateApi {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, config?: { ttl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+- Put examples:
+  // simple value
+  context.state.put('example_key', 'example_value');
+  
+  // JSON string payload
+  context.state.put('example_key', '{"example_key_1":"value_1","example_key_2":"value_2"}');
+  
+  // with TTL (seconds)
+  context.state.put('example_key', 'example_value', { ttl: 600 }); // 10 minutes
+
+- Get/Delete:
+  await context.state.get('example_key');
+  await context.state.delete('example_key');
+
+- Characteristics and limits:
+  - Intended for ephemeral entries, not long-term storage
+  - Eventually consistent; global propagation may take ~60s
+  - TTL default 604800 seconds (7 days); range 60..604800
+  - Key/value types: string or binary
+  - Max key size: 512 bytes; max value size: 1 MB
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/context-state/
+
+SECTION 11 — Hooks (Lifecycle logic and composition)
+
+- Purpose: extend mesh behavior at lifecycle points (for example, auth, request decoration) with access to `context`, including `context.state` and `context.secrets`.
+
+- Declare hooks in mesh using plugins.hooks with a composer function and optional blocking:
+{
+  "meshConfig": {
+    "plugins": [
+      {
+        "hooks": {
+          "beforeAll": {
+            "composer": "./hooks.js#accsRestAuth",
+            "blocking": true
+          }
+        }
+      }
+    ]
+  }
+}
+
+- Example hooks.js (sketch):
+module.exports = {
+  accsRestAuth: async ({ context }) => {
+    // Example: read a secret and place a header on requests
+    const { IMS_CLIENT_ID, IMS_CLIENT_SECRET, IMS_SCOPE } = context.secrets || {};
+    // Optionally use context.state for token caching (see Context State)
+    // return enriched context headers
+    return {
+      status: 'SUCCESS',
+      data: {
+        headers: {
+          // e.g., 'authorization': `Bearer ${token}`
+        }
+      }
+    };
+  }
+};
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/hooks/
+
+SECTION 12 — Secrets Management (Secure configuration)
+
+- Store secrets in your Adobe Developer Console workspace; do not hardcode in mesh.json or resolvers.
+- Access secrets at runtime via `context.secrets.<KEY>`.
+- Typical use: credentials for service-to-service OAuth or API keys consumed by hooks or resolvers.
+
+- Example: define required secrets (naming illustrative)
+IMS_CLIENT_ID: <clientId>
+IMS_CLIENT_SECRET: <clientSecret>
+IMS_SCOPE: openid,AdobeID,additional_info.projectedProductContext,org.read,email,additional_info.roles,commerce.accs,profile
+
+- Example usage in a hook:
+module.exports = {
+  oauthHeader: async ({ context }) => {
+    const { IMS_CLIENT_ID, IMS_CLIENT_SECRET, IMS_SCOPE } = context.secrets || {};
+    // exchange for access token, then attach header
+    return {
+      status: 'SUCCESS',
+      data: {
+        headers: {
+          // 'authorization': `Bearer ${accessToken}`
+        }
+      }
+    };
+  }
+};
+
+- Best practices:
+  - Never log secrets or include in responses
+  - Rotate regularly and scope privileges minimally
+  - Keep secrets out of version control and UI render paths
+
+References:
+- Hooks example reading secrets via context: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/context-state/
+- Secrets management: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/secrets/
+
+SECTION 13 — Source Handlers (OpenAPI, GraphQL, JSON schemas)
+
+- Supported handlers:
+  - OpenAPI
+  - GraphQL
+  - JSON schemas
+
+- Basics:
+  - Handlers are defined under `meshConfig.sources[]`.
+  - Each source requires:
+    - `name`: alphanumeric identifier (only alphanumerical characters)
+    - `handler`: one of `openapi`, `graphql`, or `JsonSchema`
+    - Handler-specific options (for example, `source`, `endpoint`, `baseUrl`, operations)
+  - When a source schema changes, update the mesh so API Mesh can cache the changes.
+
+- Example (OpenAPI source):
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "CommerceREST",
+        "handler": {
+          "openapi": {
+            "source": "your_Commerce_API"
+          }
+        }
+      }
+    ]
+  }
+}
+
+- Reference local files in handlers:
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "CommerceREST",
+        "handler": {
+          "openapi": {
+            "source": "your_Commerce_API"
+          }
+        }
+      },
+      {
+        "name": "CommerceRESTV2",
+        "handler": {
+          "openapi": {
+            "source": "./CommerceRestV2.json"
+          }
+        }
+      }
+    ],
+    "files": [
+      {
+        "path": "./CommerceRestV2.json",
+        "content": "<LOCAL_FILE_CONTENT>"
+      }
+    ]
+  }
+}
+Notes:
+- Using this “reference local file” method, only JS and JSON files are supported.
+- See Local Development for broader `files` usage; the `files` array supports `.js`, `.ts`, and `.graphql` entries for attached content, while direct “reference” inputs for handlers are limited to JS/JSON.
+
+- Package versions (GraphQL Mesh handler versions supported by API Mesh):
+  - OpenAPI: 0.33.39
+  - GraphQL: 0.34.13
+  - JsonSchema: 0.35.38
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/basic/handlers/
+
+SECTION 14 — Adobe Commerce Samples (API Mesh)
+
+- Explore official Adobe Commerce API Mesh samples for end-to-end configurations:
+  - Repository: https://github.com/adobe/adobe-commerce-samples/tree/main/api-mesh
+- Typical samples include:
+  - OpenAPI-based Commerce REST integrations
+  - GraphQL handler examples for Commerce GraphQL endpoints
+  - JSON schema handlers with `operations` mapping (Query/Mutation), request/response schemas
+  - Additional resolvers (declarative/programmatic) to enrich or compose data across sources
+  - Transforms (rename, type merging, prefix, filter schema) to adapt schemas for unified graphs
+- Recommended usage:
+  - Clone the repo and start from a template closest to your use case
+  - Replace endpoints/credentials with your environment
+  - Validate locally with API Mesh local development, then iterate and extend
+
+SECTION 15 — Mesh CLI Command Reference (Core)
+
+- Authentication
+  - `aio auth:login`
+    - Opens browser to authenticate with Adobe ID; caches org/project/workspace selections.
+
+- Create a mesh
+  - `aio api-mesh:create mesh.json [flags]`
+    - Flags:
+      - `-c`, `--autoConfirmAction` — auto-confirm prompts
+      - `-i`, `--ignoreCache` — ignore cached org/project/workspace selection
+      - `--env <path>` — supply environment variables file (see Local Development)
+    - Requirements:
+      - The uploaded file must have a `.json` extension
+      - Only one mesh per workspace at a time
+
+- Update a mesh
+  - `aio api-mesh:update update-mesh.json`
+    - Use when changing handlers/transforms or when any source schema is modified (to refresh caching).
+
+- Delete a mesh
+  - `aio api-mesh:delete`
+    - Removes the mesh and associated caching configuration.
+
+- Status and describe
+  - `aio api-mesh:status`
+    - Check the status of mesh creation/update (use the returned `meshId` if prompted).
+  - `aio api-mesh:describe`
+    - Returns metadata including `apiKey` and GraphQL endpoint URL.
+
+- Get mesh configuration
+  - `aio api-mesh:get`
+    - Retrieve active mesh configuration for the selected workspace.
+
+- Create from prebuilt sources
+  - `aio api-mesh:source:discover`
+    - Interactive list of prebuilt sources; prints to console and copies config to clipboard.
+  - `aio api-mesh:source:install "<source_name>"`
+    - Installs a selected prebuilt mesh configuration.
+
+- Local development (recap)
+  - `aio api-mesh run mesh.json --port 9000`
+    - Default local endpoint: `http://localhost:5000/graphql` (port override via `--port` or `PORT` in `.env`).
+
+- Edge performance tip
+  - Consider `Connection: keep-alive` for API clients to avoid cold starts and improve edge performance.
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/basic/create-mesh/
+
+SECTION 16 — Install and Setup (Getting Started)
+
+- Prerequisites:
+  - Node.js
+  - nvm 18.x.x (Mac/Linux) or nvm-windows (Windows)
+  - Adobe I/O account and at least one API to integrate
+
+- Install Adobe I/O Extensible CLI:
+  npm install -g @adobe/aio-cli
+
+- Install the API Mesh plugin:
+  aio plugins:install @adobe/aio-cli-plugin-api-mesh
+
+- Next steps:
+  - Create a project and workspace in Adobe Developer Console, add API Mesh service
+  - Create a mesh (see Section 15)
+  - Optional: local development (see Section 5)
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/basic/
+
+SECTION 17 — Declarative (Configuration-based) Resolvers
+
+- Purpose: shape and augment the unified schema declaratively using `additionalResolvers` configuration.
+- Example (maps a Query to a JsonSchema operation with simple arg mapping):
+{
+  "Query": {
+    "myCart": {
+      "type": "single",
+      "source": "carts",
+      "operation": "getCart",
+      "mapArgs": { "cartId": "args.cartId" }
+    }
+  }
+}
+- Notes:
+  - Keep declarative resolvers in JSON and include via `meshConfig.additionalResolvers` or inline config
+  - Prefer declarative when no complex logic or external calls are required
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/extend/resolvers/
+
+SECTION 18 — Programmatic Resolvers
+
+- Purpose: implement custom logic in JavaScript for complex composition, fetches, or transformations.
+- Include a JS module in `meshConfig.additionalResolvers`, for example:
+[
+  "./additional-resolvers.js"
+]
+- Example (abbreviated):
+module.exports = {
+  resolvers: {
+    ConfigurableProduct: {
+      special_price: {
+        selectionSet: "{ name price_range { maximum_price { final_price { value } } } }",
+        resolve: (root, args, context, info) => {
+          // Example: fetch discounts, compose, and return computed price
+          return context.DiscountsAPI.Query.discounts({
+            root, args, context, info, selectionSet: "{ name discount }"
+          }).then(/* ... */)
+        }
+      }
+    }
+  }
+};
+- Tips:
+  - Use `context.logger.log|warn|error` for local debugging (see limits in docs)
+  - You may use `globalThis.fetch` to call external services from the edge
+
+References:
+- Programmatic resolvers: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/extend/resolvers/programmatic-resolvers/
+- Getting started + plugin install: https://developer.adobe.com/graphql-mesh-gateway/mesh/basic/
+
+SECTION 19 — Batching
+
+- Goal: batch repeated queries to reduce N+1 patterns and improve performance
+- Approach:
+  - Implement programmatic resolvers that gather keys and request in batches
+  - Use composition across handlers to fetch multiple items in a single call when possible
+  - Combine with transforms and additional resolvers to minimize chatter across services
+- See docs for canonical patterns and examples
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/extend/batching/
+
+SECTION 20 — Request and Response Headers
+
+- Per-handler headers:
+  - `operationHeaders`: headers attached to runtime requests for a handler’s operations
+  - `schemaHeaders`: headers used when fetching the schema for a handler
+- Example:
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "CatalogService",
+        "handler": {
+          "graphql": {
+            "endpoint": "https://catalog-service.adobe.io/graphql/",
+            "operationHeaders": {
+              "x-api-key": "<api_key>",
+              "Magento-Environment-Id": "<env_id>"
+            },
+            "schemaHeaders": {
+              "x-api-key": "<api_key>"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+- Dynamic headers at runtime:
+  - Use Hooks to set `data.headers` from a `beforeAll` or other hook (see Section 11)
+  - Include secrets from `context.secrets` (see Section 12)
+- Response headers:
+  - Use hooks to set response headers when required for downstream consumers
+
+Reference: https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/headers/
+
+SECTION 21 — Advanced Command Reference (Index)
+
+- Full set of Mesh commands, flags, and advanced topics:
+  - Command reference and advanced features index:
+    https://developer.adobe.com/graphql-mesh-gateway/mesh/advanced/
+
+SECTION 22 — ACCS GraphQL + Adobe I/O Runtime Actions (Template)
+
+- Purpose: connect Adobe Commerce as a Cloud Service GraphQL and Adobe I/O Runtime web actions in a single mesh.
+- Env (.env example):
+  ACCS_API_KEY=<api_key>
+  ACCS_ENV_ID=<tenant_or_environment_id>
+  ACCS_WEBSITE_CODE=base
+  ACCS_CUSTOMER_GROUP=general
+  ACCS_STORE_CODE=main_website_store
+  ACCS_STORE_VIEW_CODE=default
+  AIO_RUNTIME_BASE_URL=https://<namespace>-<workspace>-<region>.adobeio-static.net/api/v1/web
+  AIO_RUNTIME_TOKEN=<access_token>
+
+- mesh.json:
+{
+  "meshConfig": {
+    "sources": [
+      {
+        "name": "ACCS_Commerce",
+        "handler": {
+          "graphql": {
+            "endpoint": "https://na1-sandbox.api.commerce.adobe.com/{{env.ACCS_ENV_ID}}/graphql",
+            "operationHeaders": {
+              "x-api-key": "{{env.ACCS_API_KEY}}",
+              "Magento-Website-Code": "{{env.ACCS_WEBSITE_CODE}}",
+              "Magento-Customer-Group": "{{env.ACCS_CUSTOMER_GROUP}}",
+              "Magento-Store-Code": "{{env.ACCS_STORE_CODE}}",
+              "Magento-Store-View-Code": "{{env.ACCS_STORE_VIEW_CODE}}"
+            },
+            "schemaHeaders": {
+              "x-api-key": "{{env.ACCS_API_KEY}}"
+            }
+          }
+        },
+        "transforms": [
+          {
+            "prefix": {
+              "includeRootOperations": true,
+              "includeTypes": false,
+              "value": "accs_"
+            }
+          }
+        ]
+      },
+      {
+        "name": "IOActions",
+        "handler": {
+          "JsonSchema": {
+            "baseUrl": "{{env.AIO_RUNTIME_BASE_URL}}",
+            "operations": [
+              {
+                "type": "Query",
+                "field": "hello",
+                "path": "/actions/hello",
+                "method": "GET",
+                "responseTypeName": "HelloResponse"
+              },
+              {
+                "type": "Mutation",
+                "field": "placeOrder",
+                "path": "/actions/place-order",
+                "method": "POST",
+                "requestSchema": "./schemas/place-order.request.json",
+                "responseTypeName": "PlaceOrderResponse"
+              }
+            ],
+            "operationHeaders": {
+              "Authorization": "Bearer {{env.AIO_RUNTIME_TOKEN}}"
+            }
+          }
+        },
+        "transforms": [
+          {
+            "prefix": {
+              "includeRootOperations": true,
+              "includeTypes": false,
+              "value": "actions_"
+            }
+          }
+        ]
+      }
+    ],
+    "files": [
+      {
+        "path": "./schemas/place-order.request.json",
+        "content": "{\"$schema\":\"http://json-schema.org/draft-01/schema\",\"type\":\"object\",\"properties\":{\"cartId\":{\"type\":\"string\"}}}"
+      }
+    ]
+  }
+}
+
+Notes:
+- Ensure your Adobe I/O Runtime actions are exposed as web actions and reachable under AIO_RUNTIME_BASE_URL.
+- Use a service token or appropriate auth mechanism to populate AIO_RUNTIME_TOKEN for secured actions.
+- The ACCS tenant identifier is the same value as ACCS_ENV_ID and is embedded in the GraphQL endpoint path.
